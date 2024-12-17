@@ -1,11 +1,9 @@
-import React, { useState, useEffect, useRef } from 'react';
-import L from 'leaflet';
+import React, { useState, useEffect } from 'react';
+import { GoogleMap, Marker, useLoadScript, StandaloneSearchBox } from '@react-google-maps/api';
 import { useAppContext } from '../contexts/AppContext';
 import OpenStreetMapService from '../services/api';
 
-// Import marker icon images
-import markerIcon from 'leaflet/dist/images/marker-icon.png';
-import markerShadow from 'leaflet/dist/images/marker-shadow.png';
+const libraries = ['places'];
 
 const addressTypes = [
   { name: 'Home', icon: '🏠' },
@@ -28,71 +26,25 @@ const LocationPicker = () => {
     apartmentRoad: '',
     addressType: null
   });
-  const mapRef = useRef(null);
-  const markerRef = useRef(null);
+  const [searchBox, setSearchBox] = useState(null);
+  const [mapCenter, setMapCenter] = useState({ lat: 51.505, lng: -0.09 });
 
-  // Fix for Leaflet marker icon
-  useEffect(() => {
-    delete L.Icon.Default.prototype._getIconUrl;
-    L.Icon.Default.mergeOptions({
-      iconRetinaUrl: markerIcon,
-      iconUrl: markerIcon,
-      shadowUrl: markerShadow
-    });
-  }, []);
-
-  useEffect(() => {
-    // Ensure map container exists before initializing
-    const mapContainer = document.getElementById('map');
-    if (mapContainer && !mapRef.current) {
-      // Initialize map
-      mapRef.current = L.map('map').setView([51.505, -0.09], 13);
-
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© OpenStreetMap contributors'
-      }).addTo(mapRef.current);
-
-      // Add resize listener to ensure map fills container
-      const resizeMap = () => {
-        if (mapRef.current) {
-          mapRef.current.invalidateSize();
-        }
-      };
-      window.addEventListener('resize', resizeMap);
-
-      // Add click event to map
-      mapRef.current.on('click', handleMapClick);
-
-      // Cleanup function
-      return () => {
-        window.removeEventListener('resize', resizeMap);
-        if (mapRef.current) {
-          mapRef.current.remove();
-          mapRef.current = null;
-        }
-      };
-    }
-  }, []);
+  const { isLoaded, loadError } = useLoadScript({
+    googleMapsApiKey: process.env.REACT_APP_GOOGLE_MAPS_API_KEY,
+    libraries,
+  });
 
   const handleMapClick = async (e) => {
-    const { lat, lng } = e.latlng;
-
-    // Remove existing marker if any
-    if (markerRef.current) {
-      mapRef.current.removeLayer(markerRef.current);
-    }
-
-    // Add new marker
-    markerRef.current = L.marker([lat, lng]).addTo(mapRef.current);
+    const lat = e.latLng.lat();
+    const lng = e.latLng.lng();
 
     try {
-      // Update current location when a location is selected
       setCurrentLocation({ lat, lng });
-
       const foundAddress = await OpenStreetMapService.getAddressFromCoordinates(lat, lng);
 
       setMapLocation({ lat, lng });
       setAddress(foundAddress);
+      setMapCenter({ lat, lng });
       setStep('details');
     } catch (error) {
       console.error('Error fetching address:', error);
@@ -102,59 +54,47 @@ const LocationPicker = () => {
   const handleLocateMe = async () => {
     try {
       const location = await OpenStreetMapService.requestLocation();
+      setMapCenter(location);
+      setCurrentLocation(location);
 
-      // Center map and add marker
-      mapRef.current.setView([location.lat, location.lng], 15);
-
-      if (markerRef.current) {
-        mapRef.current.removeLayer(markerRef.current);
-      }
-      markerRef.current = L.marker([location.lat, location.lng]).addTo(mapRef.current);
-
-      handleMapLocationSelect(location);
-    } catch (error) {
-      console.error('Location error:', error);
-    }
-  };
-
-  const handleMapLocationSelect = async (location) => {
-    try {
       const foundAddress = await OpenStreetMapService.getAddressFromCoordinates(
         location.lat, 
         location.lng
       );
 
-      setCurrentLocation(location);
       setMapLocation(location);
       setAddress(foundAddress);
       setStep('details');
     } catch (error) {
-      console.error('Error fetching address:', error);
+      console.error('Location error:', error);
     }
   };
 
-  const handleSearchAddress = async (query) => {
-    try {
-      const results = await OpenStreetMapService.searchPlaces(query);
-      if (results.length > 0) {
-        const firstResult = results[0];
-        const location = { 
-          lat: firstResult.geometry.location.lat(), 
-          lng: firstResult.geometry.location.lng() 
+  const handleSearchAddress = async () => {
+    if (searchBox) {
+      const places = searchBox.getPlaces();
+      if (places && places.length > 0) {
+        const firstPlace = places[0];
+        const location = {
+          lat: firstPlace.geometry.location.lat(),
+          lng: firstPlace.geometry.location.lng()
         };
 
-        // Center map and add marker
-        mapRef.current.setView([location.lat, location.lng], 15);
+        try {
+          const foundAddress = await OpenStreetMapService.getAddressFromCoordinates(
+            location.lat, 
+            location.lng
+          );
 
-        if (markerRef.current) {
-          mapRef.current.removeLayer(markerRef.current);
+          setCurrentLocation(location);
+          setMapLocation(location);
+          setAddress(foundAddress);
+          setMapCenter(location);
+          setStep('details');
+        } catch (error) {
+          console.error('Address search error:', error);
         }
-        markerRef.current = L.marker([location.lat, location.lng]).addTo(mapRef.current);
-
-        handleMapLocationSelect(location);
       }
-    } catch (error) {
-      console.error('Address search error:', error);
     }
   };
 
@@ -182,7 +122,6 @@ const LocationPicker = () => {
       id: Date.now() // Simple unique ID generation
     };
 
-    // Save the address and set it as the selected address
     saveAddress(completeAddress);
     setSelectedAddress(completeAddress);
 
@@ -195,39 +134,49 @@ const LocationPicker = () => {
       apartmentRoad: '',
       addressType: null
     });
-
-    // Remove marker
-    if (markerRef.current) {
-      mapRef.current.removeLayer(markerRef.current);
-      markerRef.current = null;
-    }
   };
+
+  if (loadError) return <div>Error loading maps</div>;
+  if (!isLoaded) return <div>Loading...</div>;
 
   return (
     <div className="container mx-auto p-4">
       {step === 'map' && (
         <div>
-          <input 
-            type="text" 
-            placeholder="Search for an address" 
-            className="w-full p-2 rounded mb-2"
-            onChange={(e) => {
-              if (e.target.value.length > 2) {
-                handleSearchAddress(e.target.value);
-              }
-            }}
-          />
+          <div className="mb-2 flex">
+            <StandaloneSearchBox
+              onLoad={(ref) => setSearchBox(ref)}
+              onPlacesChanged={handleSearchAddress}
+            >
+              <input 
+                type="text" 
+                placeholder="Search for an address" 
+                className="w-full p-2 rounded"
+              />
+            </StandaloneSearchBox>
+          </div>
           <button 
             onClick={handleLocateMe}
             className="w-full bg-blue-500 text-white p-2 rounded mb-2"
           >
             Use My Current Location
           </button>
-          {/* OpenStreetMap container */}
-          <div 
-            id="map" 
-            className="w-full h-96 bg-gray-200 flex items-center justify-center"
-          ></div>
+
+          <GoogleMap
+            mapContainerClassName="w-full h-96"
+            center={mapCenter}
+            zoom={13}
+            onClick={handleMapClick}
+          >
+            {mapLocation && (
+              <Marker 
+                position={{ 
+                  lat: mapLocation.lat, 
+                  lng: mapLocation.lng 
+                }} 
+              />
+            )}
+          </GoogleMap>
         </div>
       )}
 

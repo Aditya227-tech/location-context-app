@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_URL = process.env.REACT_APP_API_URL || 'https://replit.com/@adityaaverma200/location-context-backend';// Adjust to your backend URL
+const API_URL = process.env.REACT_APP_API_URL || 'https://replit.com/@adityaaverma200/location-context-backend';
 
 const AuthService = {
   login: async (email, password) => {
@@ -68,20 +68,18 @@ const AddressService = {
   }
 };
 
-const OpenStreetMapService = {
+const GoogleMapsService = {
   getAddressFromCoordinates: async (lat, lng) => {
     try {
-      const response = await axios.get('https://nominatim.openstreetmap.org/reverse', {
+      const response = await axios.get('https://maps.googleapis.com/maps/api/geocode/json', {
         params: {
-          format: 'json',
-          lat: lat,
-          lon: lng,
-          zoom: 18,
-          addressdetails: 1
+          latlng: `${lat},${lng}`,
+          key: process.env.REACT_APP_GOOGLE_MAPS_API_KEY
         }
       });
 
-      const address = response.data.display_name;
+      // Return the first formatted address or coordinates
+      const address = response.data.results[0]?.formatted_address;
       return address || `Latitude: ${lat}, Longitude: ${lng}`;
     } catch (error) {
       console.error('Error fetching address:', error);
@@ -91,23 +89,21 @@ const OpenStreetMapService = {
 
   searchPlaces: async (query) => {
     try {
-      const response = await axios.get('https://nominatim.openstreetmap.org/search', {
+      const response = await axios.get('https://maps.googleapis.com/maps/api/place/textsearch/json', {
         params: {
-          format: 'json',
-          q: query,
-          addressdetails: 1,
-          limit: 5
+          query: query,
+          key: process.env.REACT_APP_GOOGLE_MAPS_API_KEY
         }
       });
 
-      return response.data.map(place => ({
+      return response.data.results.map(place => ({
         geometry: {
           location: {
-            lat: () => parseFloat(place.lat),
-            lng: () => parseFloat(place.lon)
+            lat: () => place.geometry.location.lat,
+            lng: () => place.geometry.location.lng
           }
         },
-        formatted_address: place.display_name
+        formatted_address: place.formatted_address
       }));
     } catch (error) {
       console.error('Error searching places:', error);
@@ -139,7 +135,7 @@ const OpenStreetMapService = {
 export default {
   ...AuthService,
   ...AddressService,
-  getAddressFromCoordinates: OpenStreetMapService.getAddressFromCoordinates,
-  searchPlaces: OpenStreetMapService.searchPlaces,
-  requestLocation: OpenStreetMapService.requestLocation
+  getAddressFromCoordinates: GoogleMapsService.getAddressFromCoordinates,
+  searchPlaces: GoogleMapsService.searchPlaces,
+  requestLocation: GoogleMapsService.requestLocation
 };
